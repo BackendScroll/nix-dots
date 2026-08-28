@@ -11,6 +11,7 @@ local plugin_modules = {
 	"snacks",
 	"dap",
 	"neotest",
+	"goose",
 }
 
 for _, mod in ipairs(plugin_modules) do

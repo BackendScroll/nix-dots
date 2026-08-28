@@ -143,6 +143,14 @@ Singleton {
                     property real width: 460
                     property real height: 330
                 }
+                property JsonObject goose: JsonObject {
+                    property bool pinned: false
+                    property bool clickthrough: true
+                    property real x: 1400
+                    property real y: 400
+                    property real width: 340
+                    property real height: 260
+                }
             }
 
             property JsonObject timer: JsonObject {

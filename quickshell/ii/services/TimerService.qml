@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 
 import qs.services
 import qs.modules.common
+import qs.modules.common.functions
 
 import Quickshell
 import Quickshell.Io
@@ -23,8 +24,10 @@ Singleton {
     readonly property string taskNotesBridge:
         Quickshell.shellPath("scripts/tasknotes-bridge.py")
     readonly property string alarmSoundPath:
-        Quickshell.shellPath(
-            "assets/sounds/pomodoro-alarm.wav"
+        FileUtils.trimFileProtocol(
+            Quickshell.shellPath(
+                "assets/sounds/pomodoro-alarm.wav"
+            )
         )
 
     property int focusTime:

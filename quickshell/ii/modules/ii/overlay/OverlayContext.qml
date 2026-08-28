@@ -14,6 +14,7 @@ Singleton {
         { identifier: "recorder", materialSymbol: "screen_record" },
         { identifier: "resources", materialSymbol: "browse_activity" },
         { identifier: "notes", materialSymbol: "note_stack" },
+        { identifier: "goose", materialSymbol: "smart_toy" },
         { identifier: "volumeMixer", materialSymbol: "volume_up" },
     ]
     

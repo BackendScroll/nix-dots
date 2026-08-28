@@ -218,13 +218,51 @@ Item {
 
         required property string pageUrl
         required property real pageZoom
+        // Only "open-webui" is wired to a desktopctl wake verb today —
+        // comfy-ui's backend service is currently disabled host-side.
+        property string backend: ""
 
         property alias view: webView
         property bool loadFailed: false
         property string errorText: ""
         property bool hasLoadedSuccessfully: false
+        property int wakeAttempts: 0
+
+        readonly property int maxWakeAttempts: 20
 
         clip: true
+
+        function wakeBackend() {
+            if (backend !== "open-webui")
+                return;
+
+            Quickshell.execDetached(["desktopctl", "ai-local"]);
+        }
+
+        function retryWake() {
+            browserPage.wakeAttempts = 0;
+            browserPage.wakeBackend();
+            retryTimer.start();
+        }
+
+        // Open WebUI takes several seconds to bind its port after being
+        // started — the first load after waking it is expected to fail.
+        // Poll by reloading until it comes up, bounded so a genuinely broken
+        // service doesn't reload forever.
+        Timer {
+            id: retryTimer
+            interval: 1500
+            repeat: true
+            onTriggered: {
+                if (browserPage.wakeAttempts >= browserPage.maxWakeAttempts) {
+                    retryTimer.stop();
+                    return;
+                }
+
+                browserPage.wakeAttempts += 1;
+                webView.reload();
+            }
+        }
 
         WebEngineView {
             id: webView
@@ -249,12 +287,20 @@ Item {
                     browserPage.loadFailed = false;
                     browserPage.hasLoadedSuccessfully = true;
                     browserPage.errorText = "";
+                    browserPage.wakeAttempts = 0;
+                    retryTimer.stop();
                 } else if (loadRequest.status === WebEngineView.LoadFailedStatus) {
                     browserPage.loadFailed = true;
                     browserPage.errorText =
                         loadRequest.errorString?.length > 0
                             ? loadRequest.errorString
                             : "The local service did not respond.";
+
+                    if (browserPage.wakeAttempts === 0)
+                        browserPage.wakeBackend();
+
+                    if (browserPage.wakeAttempts < browserPage.maxWakeAttempts)
+                        retryTimer.start();
                 }
             }
 
@@ -333,7 +379,7 @@ Item {
 
                     RippleButton {
                         buttonText: "Retry"
-                        onClicked: webView.reload()
+                        onClicked: browserPage.retryWake()
                     }
 
                     RippleButton {
@@ -510,6 +556,7 @@ Item {
                     sourceComponent: BrowserPage {
                         pageUrl: root.openWebUiUrl
                         pageZoom: root.aiConfig.openWebUiZoom
+                        backend: "open-webui"
                     }
                 }
 
@@ -526,6 +573,7 @@ Item {
                     sourceComponent: BrowserPage {
                         pageUrl: root.comfyUiUrl
                         pageZoom: root.aiConfig.comfyUiZoom
+                        backend: "comfyui"
                     }
                 }
             }

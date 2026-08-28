@@ -35,6 +35,10 @@ Singleton {
     property string shellConfigPath: `${Directories.shellConfig}/${Directories.shellConfigName}`
 	property string todoPath: FileUtils.trimFileProtocol(`${Directories.state}/user/todo.json`)
 	property string notesPath: FileUtils.trimFileProtocol(`${Directories.state}/user/notes.txt`)
+	// Written by Goose's monitor hook plugin (home/dirkk/ai/default.nix), not by
+	// QuickShell itself — this is $XDG_STATE_HOME/goose, not Directories.state
+	// (which is app-scoped to .local/state/quickshell). Read-only from here.
+	property string gooseStatusPath: FileUtils.trimFileProtocol(`${Directories.home}/.local/state/goose/monitor/status.json`)
 	property string conflictCachePath: FileUtils.trimFileProtocol(`${Directories.cache}/conflict-killer`)
     property string notificationsPath: FileUtils.trimFileProtocol(`${Directories.cache}/notifications/notifications.json`)
     property string generatedMaterialThemePath: FileUtils.trimFileProtocol(`${Directories.state}/user/generated/colors.json`)

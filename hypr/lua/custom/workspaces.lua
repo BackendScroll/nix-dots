@@ -1,4 +1,9 @@
 -- ============================================================================
+-- Workspace & Window Rule Configuration (workspace.lua)
+-- Targets the Hyprland >= 0.55 Lua config API.
+-- ============================================================================
+
+-- ============================================================================
 -- Workspace Map
 -- ============================================================================
 
@@ -13,17 +18,158 @@ local WORKSPACE = {
 }
 
 -- ============================================================================
--- Window Routing Rules
+-- Helper Functions
 -- ============================================================================
 
--- Helper to create silent workspace routing rules
-local function route_to_workspace(name, workspace, match)
-	hl.window_rule({
-		name = name,
-		match = match,
-		workspace = workspace .. " silent",
-	})
+-- hl.window_rule takes props inside `match` and effects as plain top-level
+-- fields. There is no `rule` field, and no need for one rule per effect:
+-- a single call carries as many effects as you want.
+local function window_rule(name, match, effects)
+	local rule = { name = name, match = match }
+	for key, value in pairs(effects or {}) do
+		rule[key] = value
+	end
+	hl.window_rule(rule)
 end
+
+-- Route windows silently to a specific workspace.
+local function route_to_workspace(name, workspace, match)
+	window_rule(name, match, { workspace = workspace .. " silent" })
+end
+
+-- Merge tables into a fresh one, so shared effect presets are never mutated.
+local function merge(...)
+	local result = {}
+	for _, source in ipairs({ ... }) do
+		for key, value in pairs(source) do
+			result[key] = value
+		end
+	end
+	return result
+end
+
+-- ============================================================================
+-- Gaming Window Matches
+-- ============================================================================
+
+-- gamescope: the ONLY window Hyprland sees when a game is wrapped by it. The
+-- game's own window lives inside gamescope's nested compositor and never
+-- appears in `hyprctl clients`.
+local MATCH_GAMESCOPE = { class = "^gamescope.*$" }
+
+-- Bare (unwrapped) games. Civ5 reports class `Civ5XP` under XWayland, NOT
+-- `steam_app_8930`, so it needs its own match.
+local MATCH_CIV5 = { class = "^Civ5XP$" }
+local MATCH_STEAM_GAME = { class = "^steam_app_[0-9]+$" }
+
+-- ============================================================================
+-- Gaming Window Rules
+-- ============================================================================
+
+-- Effects shared by every game window, wrapped or not.
+--
+--   sync_fullscreen  THE key one for Civ5. When on (the default), Hyprland
+--                    keeps its internal fullscreen state in sync with the
+--                    client's. Civ5 reports fullscreenClient: 0 forever, so
+--                    every workspace change drags internal fullscreen back
+--                    down to 0 to match. Turning sync off lets the rule's
+--                    fullscreen stand on its own.
+--   suppress_event   `fullscreen` is deliberately NOT in this list: it also
+--                    suppresses the rule's own fullscreen effect, so the
+--                    window never goes fullscreen at all.
+--   render_unfocused keeps frame callbacks flowing when the workspace is
+--                    hidden. Pair with misc.render_unfocused_fps.
+--   no_anim          the Lua field for the old `noanim`. Workspace-switch
+--                    animations resize the window, and XWayland forwards
+--                    those resizes to the client.
+--
+-- Deliberately NOT included: stay_focused. It pins focus to the window and
+-- then fights the compositor on every workspace change.
+local GAME_EFFECTS = {
+	fullscreen = true,
+	sync_fullscreen = false,
+	suppress_event = "maximize activate activatefocus",
+	render_unfocused = true,
+	no_anim = true,
+	idle_inhibit = "always",
+}
+
+-- FALLBACK, if sync_fullscreen alone is not enough. Sets internal and client
+-- fullscreen explicitly (0=none, 1=maximize, 2=fullscreen, 3=both), telling
+-- Civ5 it IS fullscreen so it stops trying to correct itself. Swap this in
+-- for `fullscreen = true` above rather than using both.
+--
+--     fullscreen_state = "2 2",
+
+-- Send game windows to the gaming workspace in the same rule.
+local GAME_ROUTE = { workspace = WORKSPACE.gaming .. " silent" }
+
+-- Tearing. Requires `general.allow_tearing = true` globally or it is inert.
+local TEARING_EFFECTS = { immediate = true }
+
+window_rule("gamescope-game", MATCH_GAMESCOPE, merge(GAME_EFFECTS, GAME_ROUTE, TEARING_EFFECTS))
+
+window_rule("civ5-game", MATCH_CIV5, merge(GAME_EFFECTS, GAME_ROUTE))
+
+window_rule("steam-app-game", MATCH_STEAM_GAME, merge(GAME_EFFECTS, GAME_ROUTE))
+
+-- ============================================================================
+-- Fullscreen Watchdog (last resort)
+-- ============================================================================
+
+-- Only enable this if the window rules above still lose fullscreen. It
+-- re-asserts fullscreen from Lua whenever the compositor drops it. Costs a
+-- dispatch per event, so leave it off unless you need it.
+local FULLSCREEN_WATCHDOG = false
+
+local WATCHED_GAME_CLASSES = {
+	"^Civ5XP$",
+	"^gamescope.*$",
+	"^steam_app_[0-9]+$",
+}
+
+local function is_watched_game(win)
+	if not win or not win.class then
+		return false
+	end
+	for _, pattern in ipairs(WATCHED_GAME_CLASSES) do
+		if win.class:match(pattern) then
+			return true
+		end
+	end
+	return false
+end
+
+local function reassert_fullscreen(win)
+	if not is_watched_game(win) or win.fullscreen ~= 0 then
+		return
+	end
+	-- Deferred: dispatching inside the event handler risks re-entrancy, and
+	-- event callbacks run under a ~50ms guarded call.
+	hl.timer(function()
+		if win.fullscreen == 0 then
+			hl.dispatch(hl.dsp.window.fullscreen({
+				mode = "fullscreen",
+				action = "set",
+				window = win,
+			}))
+		end
+	end, { timeout = 60, type = "oneshot" })
+end
+
+if FULLSCREEN_WATCHDOG then
+	hl.on("window.fullscreen", reassert_fullscreen)
+
+	hl.on("workspace.active", function(workspace)
+		for _, win in ipairs(workspace:get_windows()) do
+			reassert_fullscreen(win)
+		end
+	end)
+end
+
+-- ============================================================================
+-- Window Routing Rules
+-- ============================================================================
 
 -- Overview workspace: 1
 route_to_workspace("obsidian-overview-workspace", WORKSPACE.overview, {
@@ -45,17 +191,18 @@ route_to_workspace("calibre-books-workspace", WORKSPACE.books, {
 })
 
 -- Gaming workspace: 9
+-- The game windows themselves are routed above, together with their effects.
 route_to_workspace("steam-gaming-workspace", WORKSPACE.gaming, {
 	class = "^(steam|Steam|com[.]valvesoftware[.]Steam)$",
 })
 route_to_workspace("lutris-gaming-workspace", WORKSPACE.gaming, {
 	class = "^(lutris|net[.]lutris[.]Lutris)$",
 })
+
+-- Kept as a catch-all, but note it did not match Civ5: that window reports
+-- `contentType: none`, not `game`.
 route_to_workspace("game-content-workspace", WORKSPACE.gaming, {
 	content = "game",
-})
-route_to_workspace("steam-game-workspace", WORKSPACE.gaming, {
-	class = "^steam_app_[0-9]+$",
 })
 
 -- Media workspace: 10
@@ -68,7 +215,6 @@ route_to_workspace("strawberry-media-workspace", WORKSPACE.media, {
 -- Editor Workspace: 4 (Godot Custom Layout)
 -- ============================================================================
 
--- Encapsulate the entire layout setup to keep the global scope clean
 local function setup_godot_layout()
 	local CONFIG = {
 		layout_name = "godot-workspace",
@@ -334,5 +480,9 @@ local function setup_godot_layout()
 		initial_title = "^Godot Console$",
 	})
 end
+
+-- ============================================================================
+-- Initialize Custom Layouts
+-- ============================================================================
 
 setup_godot_layout()
